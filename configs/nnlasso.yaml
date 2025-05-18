@@ -1,0 +1,126 @@
+### ==============================================
+###              优化目标 (Optimizee Options)
+### ==============================================
+
+optimizee: "nnLASSO"					# 优化问题（nnLASSO, nnLASSO-linear-penalty, nnLASSO-quadratic-penalty, nnLASSO-exponential-penalty）
+input-dim: 128							# 优化变量的维度
+output-dim: 64							# 输出标签的维度
+# rho: 0.1								# 正则化项系数 [0.1]
+penalty: 0.02							# 使用罚函数方法时的惩罚因子 [0.02]
+sparsity: 10							# 输入变量的稀疏度（非零元素数量）[5]
+# fixed-dict: false						# 是否使用固定的字典矩阵W
+# optimizee-dir: "data/optimizees"		# 优化问题数据存储路径
+
+
+### ==============================================
+###              优化器配置 (Optimizer Options)
+### ==============================================
+
+optimizer: "LSTM-MLP"					# 使用的优化器类型 (proj-FISTA, LSTM-MLP, LSTM-MLP-x-proj, LSTM-MLP-y-proj, LSTM-MLP-ADMM)
+grad-method: "smooth_grad"				# 梯度计算方法 (smooth_grad, [subgrad])
+# cpu: false							# 强制使用CPU（即使GPU可用）
+device: "cuda:0"						# 指定设备 (cuda:0, cpu, [None])
+# state-scale: 0.01						# LSTM状态的初始缩放因子 [0.01]
+
+
+### ==============================================
+###             LSTM模型参数 (LSTM Parameters)
+### ==============================================
+
+lstm-layers: 2							# LSTM层数 [2]
+lstm-hidden-size: 20					# LSTM隐藏层大小 [256]
+# rnnprop-beta1: 0.95					# RNNprop一阶动量衰减系数 [0.95]
+# rnnprop-beta2: 0.95					# RNNprop二阶动量衰减系数 [0.95]
+
+
+### ==============================================
+###           可学习参数 (Learnable Parameters)
+### ==============================================
+
+## 预条件器参数 (Pre-conditioner)
+p-use: true								# p-是否可学习
+p-scale: 1.0						    # p-初始缩放因子 [1.0]
+p-scale-learned: false					# p-缩放因子是否可学习
+p-norm: "sigmoid"						# p-归一化方式 (eye, sigmoid, exp, softplus)
+
+## 偏置项参数 (Bias Terms)
+b-use: false							# b-是否可学习
+b-scale: 1.0							# b-初始缩放因子 [1.0]
+b-scale-learned: false					# b-缩放因子是否可学习
+b-norm: "sigmoid"						# b-归一化方式 (eye, sigmoid, exp, softplus)
+
+## 偏置项_1参数 (Bias_1 Terms)
+b1-use: false							# b1-是否可学习
+b1-scale: 1.0							# b1-初始缩放因子 [1e-2]
+b1-scale-learned: false					# b1-缩放因子是否可学习
+b1-norm: "eye"							# b1-归一化方式 (eye, sigmoid, exp, softplus)
+
+## 偏置项_2参数 (Bias_2 Terms)
+b2-use: false							# b2-是否可学习
+b2-scale: 1.0							# b2-初始缩放因子 [1e-2]
+b2-scale-learned: false					# b2-缩放因子是否可学习
+b2-norm: "eye"							# b2-归一化方式 (eye, sigmoid, exp, softplus)
+
+## 动量参数 (Momentum)
+a-use: true								# a-是否可学习
+a-scale: 1.0							# a-初始缩放因子 [1.0]
+a-scale-learned: false					# a-缩放因子是否可学习
+a-norm: "sigmoid"						# a-归一化方式 (eye, sigmoid, exp, softplus)
+
+
+### ==============================================
+###        经典优化器参数 (Classic Optimizers)
+### ==============================================
+
+# step-size: 1							# 步长（默认自动设置） [None]
+momentum1: 1e-4							# 一阶动量衰减系数（Adam） [None]
+momentum2: 1e-4							# 二阶动量衰减系数（Adam） [None]
+eps: 1e-8								# Adam数值稳定性常数 [None]
+hyper-step: 1e-7						# AdamHD超步长 [None]
+
+
+### ==============================================
+###              训练、验证、测试配置 (Training)
+### ==============================================
+
+## 训练配置 (Training)
+global-training-steps: 300				# 总训练步数 [1000]
+optimizer-training-steps: 20			# 每轮训练的优化步数 [100]
+unroll-length: 20						# 反向传播展开步长 [1000]
+train-batch-size: 64					# 训练批量大小 [128]
+init-lr: 1e-2							# 初始学习率 [0.1]
+# scheduler: "constant"					# 学习率调度器 ([constant], cosine)
+
+## 验证配置 (Validation)
+# val-batch-size: 64					# 训练批量大小 [256]
+val-size: 1024							# 验证集大小 [2048]
+val-length: 100							# 验证优化步数 [100]
+val-freq: 20							# 验证频率（每多少步验证一次） [200]
+# best-wait: 5							# 控制早停机制的耐心阈值 [5]
+
+## 测试配置 (Test)
+# test: false							# 是否运行测试模式
+test-batch-size: 32						# 测试批量大小 [None]
+test-size: 1024							# 测试集大小 [2048]
+test-length: 200						# 测试优化步数 [100]
+
+
+### ==============================================
+###          数据保存与日志 (Logging & Saving)
+### ==============================================
+
+save-dir: "nnLASSO"						# 结果保存目录（自动创建在results/下） [temp]
+# ckpt-path: "ckpt"						# checkpoint保存目录 [None]
+loss-save-path: "nnLASSO-losses"		# 测试损失保存文件名 [None]
+# save-to-mat: false					# 是否保存优化问题数据为.mat文件
+# load-mat: false						# 是否从.mat文件加载数据
+# save-sol: false						# 是否保存最优解
+# load-sol: false						# 是否加载最优解
+print-freq: 20							# 训练信息打印频率 [200]
+
+
+### ==============================================
+###              随机种子 (Seed)
+### ==============================================
+
+# seed: 118								# 随机种子 [118]
