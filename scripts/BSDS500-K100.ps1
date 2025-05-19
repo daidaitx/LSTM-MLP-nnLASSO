@@ -16,7 +16,7 @@ python main.py --config ./configs/nnlasso.yaml --optimizer LSTM-MLP-y-proj      
 python main.py --config ./configs/nnlasso.yaml --optimizee nnLASSO-linear-penalty      --penalty 0.024  --save-dir BSDS500-K100/nnLASSO-linear-penalty
 python main.py --config ./configs/nnlasso.yaml --optimizee nnLASSO-quadratic-penalty   --penalty 0.220  --save-dir BSDS500-K100/nnLASSO-quadratic-penalty
 python main.py --config ./configs/nnlasso.yaml --optimizee nnLASSO-exponential-penalty --penalty 0.020  --save-dir BSDS500-K100/nnLASSO-exponential-penalty
-python main.py --config ./configs/nnlasso.yaml --optimizer LSTM-MLP-ADMM --input-dim 64 --output-dim 32 --save-dir BSDS500-K100/nnLASSO-ADMM
+python main.py --config ./configs/nnlasso.yaml --optimizer LSTM-MLP-ADMM --optimizee nnLASSO-ADMM --penalty 0 --input-dim 64 --output-dim 32 --save-dir BSDS500-K100/nnLASSO-ADMM
 
 ## [test commands]
 Write-Host "================================================≤‚ ‘================================================" -ForegroundColor Yellow
@@ -27,7 +27,7 @@ python main.py --config ./configs/nnlasso.yaml --optimizer LSTM-MLP-y-proj      
 python main.py --config ./configs/nnlasso.yaml --optimizee nnLASSO-linear-penalty      --penalty 0.024  --save-dir BSDS500-K100/nnLASSO-linear-penalty      --test --test-batch-size 50 --load-mat --load-sol --optimizee-dir ./optimizees/matdata/nnlasso-real
 python main.py --config ./configs/nnlasso.yaml --optimizee nnLASSO-quadratic-penalty   --penalty 0.220  --save-dir BSDS500-K100/nnLASSO-quadratic-penalty   --test --test-batch-size 50 --load-mat --load-sol --optimizee-dir ./optimizees/matdata/nnlasso-real
 python main.py --config ./configs/nnlasso.yaml --optimizee nnLASSO-exponential-penalty --penalty 0.020  --save-dir BSDS500-K100/nnLASSO-exponential-penalty --test --test-batch-size 50 --load-mat --load-sol --optimizee-dir ./optimizees/matdata/nnlasso-real
-python main.py --config ./configs/nnlasso.yaml --optimizer LSTM-MLP-ADMM                                --save-dir BSDS500-K100/nnLASSO-ADMM                --test --test-batch-size 50 --load-mat --load-sol --optimizee-dir ./optimizees/matdata/nnlasso-real
+python main.py --config ./configs/nnlasso.yaml --optimizer LSTM-MLP-ADMM --optimizee nnLASSO-ADMM --penalty 0 --save-dir BSDS500-K100/nnLASSO-ADMM                --test --test-batch-size 50 --load-mat --load-sol --optimizee-dir ./optimizees/matdata/nnlasso-real
 
 ## [draw figures]
 Write-Host "================================================ªÊÕº================================================" -ForegroundColor Yellow

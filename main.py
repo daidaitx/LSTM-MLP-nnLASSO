@@ -38,7 +38,7 @@ parser.add('--state-scale', type=float, default=0.01, metavar='FLOAT',
 
 # Optimizee general options
 parser.add('--optimizee', type=str, metavar='STR',
-           choices=['nnLASSO', 'nnLASSO-linear-penalty', 'nnLASSO-quadratic-penalty', 'nnLASSO-exponential-penalty'],
+           choices=['nnLASSO', 'nnLASSO-linear-penalty', 'nnLASSO-quadratic-penalty', 'nnLASSO-exponential-penalty', 'nnLASSO-ADMM'],
            help='Type of optimizees to be trained on.')
 parser.add('--input-dim', type=int, metavar='INT',
            help='Dimension of the input (optimization variable).')
@@ -282,7 +282,7 @@ if opts.optimizer == 'proj-FISTA':
     optimizer = optimizers.proj_FISTA()
 elif opts.optimizer == 'LSTM-MLP':
     optimizer = optimizers.LSTM_MLP(
-        input_size  = 2,
+        input_size  = 2, # X, ∇f(X)
         output_size = 1,
         hidden_size = opts.lstm_hidden_size,
         layers = opts.lstm_layers,
@@ -290,7 +290,7 @@ elif opts.optimizer == 'LSTM-MLP':
     )
 elif opts.optimizer == 'LSTM-MLP-x-proj':
     optimizer = optimizers.LSTM_MLP_x_Proj(
-        input_size  = 2,
+        input_size  = 2, # X, ∇f(X)
         output_size = 1,
         hidden_size = opts.lstm_hidden_size,
         layers = opts.lstm_layers,
@@ -298,7 +298,7 @@ elif opts.optimizer == 'LSTM-MLP-x-proj':
     )
 elif opts.optimizer == 'LSTM-MLP-y-proj':
     optimizer = optimizers.LSTM_MLP_y_Proj(
-        input_size  = 2,
+        input_size  = 2, # X, ∇f(X)
         output_size = 1,
         hidden_size = opts.lstm_hidden_size,
         layers = opts.lstm_layers,
@@ -306,7 +306,7 @@ elif opts.optimizer == 'LSTM-MLP-y-proj':
     )
 elif opts.optimizer == 'LSTM-MLP-ADMM':
     optimizer = optimizers.LSTM_MLP_ADMM(
-        input_size  = 2,
+        input_size  = 2, # X, ∇f(X)
         output_size = 1,
         hidden_size = opts.lstm_hidden_size,
         layers = opts.lstm_layers,

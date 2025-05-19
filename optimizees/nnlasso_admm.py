@@ -6,7 +6,7 @@ import torch.nn as nn
 from .base import BaseOptimizee
 
 
-class nnLASSO(BaseOptimizee):
+class nnLASSO_ADMM(BaseOptimizee):
 
 	# 初始化：生成/加载nnLASSO优化问题
     def __init__(
@@ -16,6 +16,7 @@ class nnLASSO(BaseOptimizee):
         Y = None,
         rho = 0.1,
         s = 5,
+        penalty = 0.02,
         device = 'cpu',
         **options
     ) -> None:
@@ -51,6 +52,7 @@ class nnLASSO(BaseOptimizee):
         self.output_dim = options.get('output_dim')  # 输出维度
         self.rho = rho        # L1正则化系数
         self.s = s            # 稀疏度(非零元素数量)
+        self.pen = penalty    # 罚函数惩罚系数
 
         # 处理随机种子
         seed = options.get('seed', None)
@@ -112,14 +114,23 @@ class nnLASSO(BaseOptimizee):
         初始化:
         - X: 形状为(batch_size, input_dim, 1)的零张量
         - Z: 形状为(batch_size, input_dim, 1)的零张量，存储在vars字典中
+        - S: 形状为(batch_size, input_dim, 1)的零张量，存储在vars字典中
+        - U1: 形状为(batch_size, input_dim, 1)的零张量，存储在vars字典中
+		- U2: 形状为(batch_size, input_dim, 1)的零张量，存储在vars字典中
         """
         self.X = torch.zeros(self.batch_size, self.input_dim, 1).to(self.device)
         prox_out = torch.zeros(self.batch_size, self.input_dim, 1).to(self.device)
         self.set_var('Z', prox_out)
+        self.set_var('S', prox_out)
+        self.set_var('U1', prox_out)
+        self.set_var('U2', prox_out)
 
 	# 变量字典self.vars的获取、设置、分离
-	# 		- X（动量步后的y）
-	# 		- Z（近端算子后的x）
+	# 		- X（2-norm 变量）
+	# 		- Z（1-norm 变量）
+    # 		- S（非负变量）
+    # 		- U1（Z-对偶变量）
+    # 		- U2（S-对偶变量）
     def get_var(self, var_name):
         """从内部变量字典中获取变量。
         
@@ -145,11 +156,13 @@ class nnLASSO(BaseOptimizee):
         
         分离vars字典中存储的所有张量，防止梯度计算。
         """
-        for var in self.vars.values():
-            var.detach_()
+        for var_name in self.vars:
+            var = self.get_var(var_name)
+            var_detached = var.detach()
+            self.set_var(var_name, var_detached)
 
 
-	# 获取、设置优化变量X（动量步后的y）
+	# 获取、设置优化变量X（2-norm 变量）
     @property
     def X(self):
         """获取当前优化变量X。
@@ -168,16 +181,16 @@ class nnLASSO(BaseOptimizee):
         """
         self.set_var('X', value)
 
-	# 计算Lipschitz常数
-    def grad_lipschitz(self):
-        """计算平滑部分梯度的Lipschitz常数。
+	# # 计算Lipschitz常数
+    # def grad_lipschitz(self):
+    #     """计算平滑部分梯度的Lipschitz常数。
         
-        返回:
-            torch.Tensor: 每个样本的Lipschitz常数，
-                         形状为(batch_size, 1, 1)
-        """
-        lip = torch.linalg.norm(self.W, dim=(-2,-1), ord=2) ** 2
-        return lip.reshape(self.batch_size, 1, 1)
+    #     返回:
+    #         torch.Tensor: 每个样本的Lipschitz常数，
+    #                      形状为(batch_size, 1, 1)
+    #     """
+    #     lip = torch.linalg.norm(self.W, dim=(-2,-1), ord=2) ** 2
+    #     return lip.reshape(self.batch_size, 1, 1)
 
 	# 计算目标函数值（带偏移和不带偏移、批处理版本和非批处理版本）
     def objective(self, inputs: dict = None, compute_grad: bool = False):
@@ -196,15 +209,44 @@ class nnLASSO(BaseOptimizee):
         X = inputs.get('X', self.X)
         Y = inputs.get('Y', self.Y)
         W = inputs.get('W', self.W)
+        Z = inputs.get('Z', self.get_var('Z'))
+        S = inputs.get('S', self.get_var('S'))
 
         with torch.set_grad_enabled(compute_grad):
             residual = torch.bmm(self.W, X) - self.Y
             l2 = 0.5 * (residual**2.0).sum(dim=(1,2)).mean()
             l1 = self.rho * torch.abs(X).sum(dim=(1,2)).mean()
-            return l1 + l2
+            l_penalty = 0.5 * self.pen * (((X - Z)**2.0).sum(dim=(1,2)).mean()+((X - S)**2.0).sum(dim=(1,2)).mean())
+            return (1-self.pen)*(l1 + l2) + l_penalty
 
     def objective_batch(self, inputs: dict = {}, compute_grad: bool = False):
         """计算批处理的目标函数值。
+        
+        参数:
+            inputs (dict, 可选): 包含要使用变量的字典。
+                如果未提供，则使用类变量。
+            compute_grad (bool, 可选): 是否计算梯度。
+            
+        返回:
+            torch.Tensor: 每个样本的目标函数值
+        """
+        if inputs is None:
+            inputs = {}
+        X = inputs.get('X', self.X)
+        Y = inputs.get('Y', self.Y)
+        W = inputs.get('W', self.W)
+        Z = inputs.get('Z', self.get_var('Z'))
+        S = inputs.get('S', self.get_var('S'))
+
+        with torch.set_grad_enabled(compute_grad):
+            residual = torch.bmm(self.W, X) - self.Y
+            l2 = 0.5 * (residual**2.0).sum(dim=(1,2))
+            l1 = self.rho * torch.abs(X).sum(dim=(1,2))
+            l_penalty = 0.5 * self.pen * (((X - Z)**2.0).sum(dim=(1,2))+((X - S)**2.0).sum(dim=(1,2)))
+            return (1-self.pen)*(l1 + l2) + l_penalty
+        
+    def objective_batch_without_penalty(self, inputs: dict = {}, compute_grad: bool = False):
+        """计算批处理的目标函数值（不含罚函数惩罚项）。
         
         参数:
             inputs (dict, 可选): 包含要使用变量的字典。
@@ -227,7 +269,7 @@ class nnLASSO(BaseOptimizee):
             return l1 + l2
 
     def objective_batch_shift(self, inputs: dict = {}, compute_grad: bool = False):
-        """计算批处理的偏移目标函数值。
+        """计算批处理的偏移目标函数值（不含罚函数惩罚项）。
         
         偏移目标函数值为(f(x) - f*)/f*，其中f*为最优值。
         
@@ -241,7 +283,7 @@ class nnLASSO(BaseOptimizee):
         """
         if inputs is None:
             inputs = {}
-        obj = self.objective_batch(inputs, compute_grad)
+        obj = self.objective_batch_without_penalty(inputs, compute_grad)
         fstar = self.fstar.reshape_as(obj)
         valid_ind = (fstar != 0)
         ret = obj - fstar 
@@ -249,7 +291,7 @@ class nnLASSO(BaseOptimizee):
         return ret
         
     def objective_shift(self, inputs: dict = {}, compute_grad: bool = False):
-        """计算批处理的平均偏移目标函数值。
+        """计算批处理的平均偏移目标函数值（不含罚函数惩罚项）。
         
         参数:
             inputs (dict, 可选): 包含要使用变量的字典。
@@ -263,7 +305,108 @@ class nnLASSO(BaseOptimizee):
             inputs = {}
         return self.objective_batch_shift(inputs, compute_grad).mean()
 
-	# 计算目标函数的梯度（包括PyTorch内置的反向传播梯度、光滑项梯度、次梯度）
+    # 计算ADMM所需的变量更新
+    def update_X(self, inputs: dict = None, compute_grad: bool = False, **kwargs):
+        if inputs is None:
+            inputs = {}
+        assert 'rho1' in inputs and 'rho2' in inputs, 'rho1 and rho2 must be provided for ADMM x-update'
+        rho1 = inputs.get('rho1')
+        rho2 = inputs.get('rho2')
+        A = inputs.get('W', self.W)
+        AT = A.permute(0, 2, 1)
+        b = inputs.get('Y', self.Y)
+        # lam = inputs.get('rho', self.rho)
+        # x = inputs.get('X', self.X)
+        z = inputs.get('Z', self.get_var('Z'))
+        s = inputs.get('S', self.get_var('S'))
+        u1 = inputs.get('U1', self.get_var('U1'))
+        u2 = inputs.get('U2', self.get_var('U2'))
+
+        with torch.set_grad_enabled(compute_grad):
+            LHS = torch.bmm(AT, A) + torch.diag_embed((rho1 + rho2).squeeze(-1))
+            RHS = torch.bmm(AT, b) + rho1 * z + rho2 * s - u1 - u2
+            return torch.linalg.solve(LHS, RHS)
+    
+    def update_Z(self, inputs: dict = None, compute_grad: bool = False, **kwargs):
+        if inputs is None:
+            inputs = {}
+        assert 'rho1' in inputs, 'rho1 must be provided for ADMM z-update'
+        rho1 = inputs.get('rho1')
+        # A = inputs.get('W', self.W)
+        # AT = A.permute(0, 2, 1)
+        # b = inputs.get('Y', self.Y)
+        lam = inputs.get('rho', self.rho)
+        x = inputs.get('X', self.X)
+        # z = inputs.get('Z', self.get_var('Z'))
+        # s = inputs.get('S', self.get_var('S'))
+        u1 = inputs.get('U1', self.get_var('U1'))
+        # u2 = inputs.get('U2', self.get_var('U2'))
+
+        with torch.set_grad_enabled(compute_grad):
+            XUR = x + u1 / rho1
+            ABS = torch.abs(XUR)
+            SGN = torch.sign(XUR)
+            return torch.relu(ABS - lam / rho1) * SGN
+        
+    def update_S(self, inputs: dict = None, compute_grad: bool = False, **kwargs):
+        if inputs is None:
+            inputs = {}
+        assert 'rho2' in inputs, 'rho2 must be provided for ADMM s-update'
+        rho2 = inputs.get('rho2')
+        # A = inputs.get('W', self.W)
+        # AT = A.permute(0, 2, 1)
+        # b = inputs.get('Y', self.Y)
+        # lam = inputs.get('rho', self.rho)
+        x = inputs.get('X', self.X)
+        # z = inputs.get('Z', self.get_var('Z'))
+        # s = inputs.get('S', self.get_var('S'))
+        # u1 = inputs.get('U1', self.get_var('U1'))
+        u2 = inputs.get('U2', self.get_var('U2'))
+
+        with torch.set_grad_enabled(compute_grad):
+            return torch.relu(x + u2 / rho2)
+        
+    def update_U1(self, inputs: dict = None, compute_grad: bool = False, **kwargs):
+        if inputs is None:
+            inputs = {}
+        assert 'rho1' in inputs and 'tau1' in inputs, 'rho1 and tau1 must be provided for ADMM u1-update'
+        rho1 = inputs.get('rho1')
+        tau1 = inputs.get('tau1')
+        # A = inputs.get('W', self.W)
+        # AT = A.permute(0, 2, 1)
+        # b = inputs.get('Y', self.Y)
+        # lam = inputs.get('rho', self.rho)
+        x = inputs.get('X', self.X)
+        z = inputs.get('Z', self.get_var('Z'))
+        # s = inputs.get('S', self.get_var('S'))
+        u1 = inputs.get('U1', self.get_var('U1'))
+        # u2 = inputs.get('U2', self.get_var('U2'))
+
+        with torch.set_grad_enabled(compute_grad):
+            UPD = tau1 * rho1 * (x - z)
+            return u1 + UPD
+        
+    def update_U2(self, inputs: dict = None, compute_grad: bool = False, **kwargs):
+        if inputs is None:
+            inputs = {}
+        assert 'rho2' in inputs and 'tau2' in inputs, 'rho2 and tau2 must be provided for ADMM u2-update'
+        rho2 = inputs.get('rho2')
+        tau2 = inputs.get('tau2')
+        # A = inputs.get('W', self.W)
+        # AT = A.permute(0, 2, 1)
+        # b = inputs.get('Y', self.Y)
+        # lam = inputs.get('rho', self.rho)
+        x = inputs.get('X', self.X)
+        # z = inputs.get('Z', self.get_var('Z'))
+        s = inputs.get('S', self.get_var('S'))
+        # u1 = inputs.get('U1', self.get_var('U1'))
+        u2 = inputs.get('U2', self.get_var('U2'))
+
+        with torch.set_grad_enabled(compute_grad):
+            UPD = tau2 * rho2 * (x - s)
+            return u2 + UPD
+        
+    # 计算目标函数的梯度（包括PyTorch内置的反向传播梯度、光滑项梯度、次梯度）
     def get_grad(
         self,
         grad_method: str,
@@ -332,10 +475,14 @@ class nnLASSO(BaseOptimizee):
         X = inputs.get('X', self.X) # self.X 为默认值
         Y = inputs.get('Y', self.Y) # self.Y 为默认值
         W = inputs.get('W', self.W) # self.W 为默认值
+        Z = inputs.get('Z', self.get_var('Z'))
+        S = inputs.get('S', self.get_var('S'))
 
         with torch.set_grad_enabled(compute_grad):
             residual = torch.bmm(W, X) - Y
-            return torch.bmm(W.permute(0,2,1), residual) # 返回 W'(WX-Y)
+            l2 = torch.bmm(W.permute(0,2,1), residual)
+            l_penalty = self.pen * ((X - Z) + (X - S))
+            return (1-self.pen)*l2 + l_penalty
 
     def subgrad(self, inputs: dict = None, compute_grad: bool = False, **kwargs):
         """计算目标函数的次梯度。
@@ -354,29 +501,33 @@ class nnLASSO(BaseOptimizee):
         X = inputs.get('X', self.X)
         Y = inputs.get('Y', self.Y)
         W = inputs.get('W', self.W)
+        Z = inputs.get('Z', self.get_var('Z'))
+        S = inputs.get('S', self.get_var('S'))
 
         with torch.set_grad_enabled(compute_grad):
             residual = torch.bmm(W, X) - Y
-            return (torch.bmm(W.permute(0,2,1), residual) +
-                    self.rho * torch.sign(X))
+            l2 = torch.bmm(W.permute(0,2,1), residual)
+            l1 = self.rho * torch.sign(X)
+            l_penalty = self.pen * ((X - Z) + (X - S))
+            return (1-self.pen)*(l1 + l2) + l_penalty
 
-	# 计算近端算子prox_out（近端算子后的x）
-    def prox(self, inputs: dict, compute_grad: bool = False, **kwargs):
-        """计算近端算子。
+	# # 计算近端算子prox_out（近端算子后的x）
+    # def prox(self, inputs: dict, compute_grad: bool = False, **kwargs):
+    #     """计算近端算子。
         
-        参数:
-            inputs (dict): 必须包含'P'和'X'键
-            compute_grad (bool, 可选): 是否计算梯度。
-            **kwargs: 其他关键字参数
+    #     参数:
+    #         inputs (dict): 必须包含'P'和'X'键
+    #         compute_grad (bool, 可选): 是否计算梯度。
+    #         **kwargs: 其他关键字参数
             
-        返回:
-            torch.Tensor: 近端算子结果
-        """
-        P = inputs['P']
-        X = inputs['X']
-        with torch.set_grad_enabled(compute_grad):
-            mag = nn.functional.relu(torch.abs(X) - self.rho * P)
-            return torch.sign(X) * mag
+    #     返回:
+    #         torch.Tensor: 近端算子结果
+    #     """
+    #     P = inputs['P']
+    #     X = inputs['X']
+    #     with torch.set_grad_enabled(compute_grad):
+    #         mag = nn.functional.relu(torch.abs(X) - self.rho * P)
+    #         return torch.sign(X) * mag
 
 	# 文件、解的保存和加载
     def save_to_file(self, path):

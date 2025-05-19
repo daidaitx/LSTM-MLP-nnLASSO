@@ -16,7 +16,7 @@ python main.py --config ./configs/nnlasso.yaml --optimizer LSTM-MLP-y-proj      
 python main.py --config ./configs/nnlasso.yaml --optimizee nnLASSO-linear-penalty      --penalty 0.024  --save-dir synthetic-K20/nnLASSO-linear-penalty
 python main.py --config ./configs/nnlasso.yaml --optimizee nnLASSO-quadratic-penalty   --penalty 0.220  --save-dir synthetic-K20/nnLASSO-quadratic-penalty
 python main.py --config ./configs/nnlasso.yaml --optimizee nnLASSO-exponential-penalty --penalty 0.020  --save-dir synthetic-K20/nnLASSO-exponential-penalty
-python main.py --config ./configs/nnlasso.yaml --optimizer LSTM-MLP-ADMM --input-dim 64 --output-dim 32 --save-dir synthetic-K20/nnLASSO-ADMM
+python main.py --config ./configs/nnlasso.yaml --optimizer LSTM-MLP-ADMM --optimizee nnLASSO-ADMM --penalty 0 --input-dim 64 --output-dim 32 --save-dir synthetic-K20/nnLASSO-ADMM
 
 ## [test commands]
 Write-Host "================================================≤‚ ‘================================================" -ForegroundColor Yellow
@@ -27,7 +27,7 @@ python main.py --config ./configs/nnlasso.yaml --optimizer LSTM-MLP-y-proj      
 python main.py --config ./configs/nnlasso.yaml --optimizee nnLASSO-linear-penalty      --penalty 0.024  --save-dir synthetic-K20/nnLASSO-linear-penalty      --test --load-mat --load-sol --optimizee-dir ./optimizees/matdata/nnlasso-rand
 python main.py --config ./configs/nnlasso.yaml --optimizee nnLASSO-quadratic-penalty   --penalty 0.220  --save-dir synthetic-K20/nnLASSO-quadratic-penalty   --test --load-mat --load-sol --optimizee-dir ./optimizees/matdata/nnlasso-rand
 python main.py --config ./configs/nnlasso.yaml --optimizee nnLASSO-exponential-penalty --penalty 0.020  --save-dir synthetic-K20/nnLASSO-exponential-penalty --test --load-mat --load-sol --optimizee-dir ./optimizees/matdata/nnlasso-rand
-python main.py --config ./configs/nnlasso.yaml --optimizer LSTM-MLP-ADMM                                --save-dir synthetic-K20/nnLASSO-ADMM                --test --load-mat --load-sol --optimizee-dir ./optimizees/matdata/nnlasso-rand
+python main.py --config ./configs/nnlasso.yaml --optimizer LSTM-MLP-ADMM --optimizee nnLASSO-ADMM --penalty 0 --save-dir synthetic-K20/nnLASSO-ADMM                --test --load-mat --load-sol --optimizee-dir ./optimizees/matdata/nnlasso-rand
 
 ## [draw figures]
 Write-Host "================================================ªÊÕº================================================" -ForegroundColor Yellow

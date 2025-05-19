@@ -22,7 +22,7 @@ class LSTM_MLP_ADMM(nn.Module):
     
     主要组件：
     - LSTM: 处理梯度历史信息
-    - MLP(p,a,b,b1,b2): 生成预条件、动量等优化参数
+    - MLP: 生成预条件、动量等优化参数
     - 近端算子: 处理非光滑项
     
     参考文献:
@@ -62,17 +62,21 @@ class LSTM_MLP_ADMM(nn.Module):
         # 中间MLP层(借鉴NA-ALISTA架构)
         self.linear = nn.Linear(hidden_size, hidden_size, bias=use_bias)
 
-        # ADMM参数nu生成层
-        self.linear_nu = nn.Linear(hidden_size, output_size, bias=use_bias)
-        # 松弛参数alpha生成层
-        self.linear_alpha = nn.Linear(hidden_size, output_size, bias=use_bias)
+        # 增广参数 rho1 生成层
+        self.linear_rho1 = nn.Linear(hidden_size, output_size, bias=use_bias)
+        # 增广参数 rho2 生成层
+        self.linear_rho2 = nn.Linear(hidden_size, output_size, bias=use_bias)
+        # 步长参数 tau1 生成层
+        self.linear_tau1 = nn.Linear(hidden_size, output_size, bias=use_bias)
+        # 步长参数 tau2 生成层
+        self.linear_tau2 = nn.Linear(hidden_size, output_size, bias=use_bias)
 
         self.state = None
-        self.step_size = kwargs.get('step_size', None)
+        # self.step_size = kwargs.get('step_size', None)
 
     @property
     def device(self):
-        return self.linear_nu.weight.device
+        return self.linear_rho1.weight.device
 
     def reset_state(self, optimizees: BaseOptimizee, step_size: float, **kwargs):
         """
@@ -103,8 +107,8 @@ class LSTM_MLP_ADMM(nn.Module):
                 self.layers, batch_size, self.hidden_size
             ).to(self.device),
         )
-        self.step_size = (step_size if step_size
-                          else 0.9999 / optimizees.grad_lipschitz())
+        # self.step_size = (step_size if step_size
+        #                   else 0.9999 / optimizees.grad_lipschitz())
 
     def detach_state(self):
         """
@@ -145,10 +149,12 @@ class LSTM_MLP_ADMM(nn.Module):
         算法步骤:
             1. 获取当前梯度信息
             2. LSTM处理梯度序列
-            3. MLP生成优化参数(nu,alpha)
-            4. 更新X
-            5. 更新Z
-            6. 更新U
+            3. MLP生成优化参数(rho1,rho2,tau1,tau2)
+            4. 更新 2-norm 变量 X
+            5. 更新 1-norm 变量 Z
+            6. 更新 非负约束变量 S
+            7. 更新 Z-dual 变量 U1
+            8. 更新 S-dual 变量 U2
         """
         batch_size = optimizees.batch_size
 
@@ -157,44 +163,85 @@ class LSTM_MLP_ADMM(nn.Module):
         if self.state is None or reset_state:
             self.reset_state(optimizees)
         # 获取当前梯度信息(用于LSTM输入)
-        lstm_input = optimizees.get_grad(
+        lstm_input_grad_X = optimizees.get_grad(
             grad_method=grad_method,
             compute_grad=self.training,
             retain_graph=self.training,
         )
-        lstm_input2 = optimizees.X  # 当前优化变量值
+        lstm_input_X = optimizees.X               # 2-norm 变量值
+        # lstm_input_Z = optimizees.get_var('Z')    # 1-norm 变量值
+        # lstm_input_S = optimizees.get_var('S')    # 非负约束变量值
+        # lstm_input_U1 = optimizees.get_var('U1')  # Z-dual 变量值
+        # lstm_input_U2 = optimizees.get_var('U2')  # S-dual 变量值
         # （可选）截断梯度计算图
         if detach_grad:
-            lstm_input = lstm_input.detach()
-            lstm_input2 = lstm_input2.detach()
+            lstm_input_grad_X = lstm_input_grad_X.detach()
+            lstm_input_X = lstm_input_X.detach()
+            # lstm_input_Z = lstm_input_Z.detach()
+            # lstm_input_S = lstm_input_S.detach()
+            # lstm_input_U1 = lstm_input_U1.detach()
+            # lstm_input_U2 = lstm_input_U2.detach()
         # 准备LSTM输入数据(合并梯度和当前变量值)
-        lstm_input = lstm_input.flatten().unsqueeze(0).unsqueeze(-1)
-        lstm_input2 = lstm_input2.flatten().unsqueeze(0).unsqueeze(-1)
-        lstm_in = torch.cat((lstm_input,lstm_input2), dim = 2)
+        lstm_input_grad_X = lstm_input_grad_X.flatten().unsqueeze(0).unsqueeze(-1)
+        lstm_input_X = lstm_input_X.flatten().unsqueeze(0).unsqueeze(-1)
+        # lstm_input_Z = lstm_input_Z.flatten().unsqueeze(0).unsqueeze(-1)
+        # lstm_input_S = lstm_input_S.flatten().unsqueeze(0).unsqueeze(-1)
+        # lstm_input_U1 = lstm_input_U1.flatten().unsqueeze(0).unsqueeze(-1)
+        # lstm_input_U2 = lstm_input_U2.flatten().unsqueeze(0).unsqueeze(-1)
+        lstm_in = torch.cat((lstm_input_grad_X, lstm_input_X), dim = 2)
         # LSTM核心处理
         output, self.state = self.lstm(lstm_in, self.state)
         output = F.relu(self.linear(output))  # 中间非线性变换
         
         ## MLP步骤
         # 生成各优化参数
-        nu = self.linear_nu(output).reshape_as(optimizees.X)
-        alpha = self.linear_alpha(output).reshape_as(optimizees.X)
+        rho1 = self.linear_rho1(output).reshape_as(optimizees.X)
+        rho2 = self.linear_rho2(output).reshape_as(optimizees.X)
+        tau1 = self.linear_tau1(output).reshape_as(optimizees.X)
+        tau2 = self.linear_tau2(output).reshape_as(optimizees.X)
+        # 限制参数必须为正数
+        rho1 = torch.relu(rho1) + 1e-10
+        rho2 = torch.relu(rho2) + 1e-10
+        tau1 = torch.relu(tau1) + 1e-10
+        tau2 = torch.relu(tau2) + 1e-10
+
+        ## 更新 2-norm 变量 X
+        X = optimizees.update_X(
+            inputs = {'rho1': rho1, 'rho2': rho2},
+            compute_grad=self.training,
+            retain_graph=False
+        )
+        ## 更新 1-norm 变量 Z
+        Z = optimizees.update_Z(
+            inputs = {'rho1': rho1},
+            compute_grad=self.training,
+            retain_graph=False
+        )
+        ## 更新 非负约束变量 S
+        S = optimizees.update_S(
+            inputs = {'rho2': rho2},
+            compute_grad=self.training,
+            retain_graph=False
+        )
+        ## 更新 Z-dual 变量 U1
+        U1 = optimizees.update_U1(
+            inputs = {'rho1': rho1, 'tau1': tau1},
+            compute_grad=self.training,
+            retain_graph=False
+        )
+        ## 更新 S-dual 变量 U2
+        U2 = optimizees.update_U2(
+            inputs = {'rho2': rho2, 'tau2': tau2},
+            compute_grad=self.training,
+            retain_graph=False
+        )
         
-        ## 更新原变量 X
-        ATA_nuI = torch.bmm(optimizees.W.permute(0, 2, 1), optimizees.W) + nu * torch.eye(optimizees.W.size(2), dtype=optimizees.W.dtype, device=optimizees.W.device).unsqueeze(0).repeat(optimizees.W.size(0), 1, 1)
-        rhs = torch.bmm(optimizees.W.permute(0, 2, 1), optimizees.Y) + nu * (optimizees.get_var('Z') - optimizees.get_var('U'))
-        X_new = torch.linalg.solve(ATA_nuI, rhs.squeeze(-1)).unsqueeze(-1)
-        ## 更新引入变量 Z
-        x_relaxed = alpha * X_new + (1 - alpha) * optimizees.get_var('Z')
-        Z_temp = x_relaxed + optimizees.get_var('U')
-        Z_new = torch.clamp(Z_temp - optimizees.rho / nu, min=0) * torch.sign(Z_temp)
-        Z_new = torch.where(Z_temp > optimizees.rho / nu, Z_new, torch.zeros_like(Z_new))
-        ## 更新对偶变量 U
-        U_new = optimizees.get_var('U') + x_relaxed - Z_new
         ## 更新变量
-        optimizees.set_var('X', X_new)
-        optimizees.set_var('Z', Z_new)
-        optimizees.set_var('U', U_new)
+        optimizees.X = X
+        optimizees.set_var('Z', Z)
+        optimizees.set_var('S', S)
+        optimizees.set_var('U1', U1)
+        optimizees.set_var('U2', U2)
 
         return optimizees
 
